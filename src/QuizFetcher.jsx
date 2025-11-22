@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import styles from "./QuizFetcher.module.css";
 import SelectableQuestionList from "./SelectableQuestionList";
 
-// All Open Trivia DB categories
 const CATEGORY_IDS = {
     "General Knowledge": 9,
     "Books": 10,
@@ -32,12 +31,18 @@ const CATEGORY_IDS = {
 
 export default function QuizFetcher() {
     const [selectedCategories, setSelectedCategories] = useState(() => {
-        const saved = localStorage.getItem('selectedCategories');
+        const saved = localStorage.getItem("selectedCategories");
         return saved ? JSON.parse(saved) : Object.fromEntries(Object.keys(CATEGORY_IDS).map(cat => [cat, 0]));
     });
 
     const [questions, setQuestions] = useState(() => {
-        const saved = localStorage.getItem('questions');
+        const saved = localStorage.getItem("questions");
+        return saved ? JSON.parse(saved) : [];
+    });
+
+    // NEW: track previously shown questions
+    const [shownQuestions, setShownQuestions] = useState(() => {
+        const saved = localStorage.getItem("shownQuestions");
         return saved ? JSON.parse(saved) : [];
     });
 
@@ -47,7 +52,7 @@ export default function QuizFetcher() {
     const handleInputChange = (category, value) => {
         const updated = { ...selectedCategories, [category]: Number(value) };
         setSelectedCategories(updated);
-        localStorage.setItem('selectedCategories', JSON.stringify(updated));
+        localStorage.setItem("selectedCategories", JSON.stringify(updated));
     };
 
     const fetchQuestions = async () => {
@@ -65,13 +70,28 @@ export default function QuizFetcher() {
                 });
 
             const results = await Promise.all(promises);
-            const combined = results.flatMap(r => r.results || []).map((q, index) => ({
+
+            // Flatten results
+            const fetched = results.flatMap(r => r.results || []);
+
+            // NEW: filter out previously shown questions
+            const filtered = fetched.filter(q => !shownQuestions.includes(q.question));
+
+            // Add unique IDs
+            const finalQuestions = filtered.map((q, index) => ({
                 ...q,
                 id: `${Date.now()}-${index}`
             }));
 
-            setQuestions(combined);
-            localStorage.setItem('questions', JSON.stringify(combined));
+            // Update current questions only with fresh unseen ones
+            setQuestions(finalQuestions);
+            localStorage.setItem("questions", JSON.stringify(finalQuestions));
+
+            // Update shown history
+            const updatedShown = [...shownQuestions, ...filtered.map(q => q.question)];
+            setShownQuestions(updatedShown);
+            localStorage.setItem("shownQuestions", JSON.stringify(updatedShown));
+
         } catch (err) {
             setError("Failed to load questions.");
         } finally {
@@ -79,13 +99,19 @@ export default function QuizFetcher() {
         }
     };
 
-    // Reset API questions and category selections
+    // Reset quiz UI + categories, BUT KEEP HISTORY
     const resetQuestionsOnly = () => {
         setQuestions([]);
         const resetCategories = Object.fromEntries(Object.keys(CATEGORY_IDS).map(cat => [cat, 0]));
         setSelectedCategories(resetCategories);
-        localStorage.removeItem('questions');
-        localStorage.setItem('selectedCategories', JSON.stringify(resetCategories));
+        localStorage.removeItem("questions");
+        localStorage.setItem("selectedCategories", JSON.stringify(resetCategories));
+    };
+
+    // OPTIONAL: reset history too if needed
+    const resetShownHistory = () => {
+        setShownQuestions([]);
+        localStorage.removeItem("shownQuestions");
     };
 
     const totalSelected = Object.values(selectedCategories).reduce((a, b) => a + b, 0);
@@ -102,7 +128,7 @@ export default function QuizFetcher() {
                             value={selectedCategories[cat]}
                             onChange={e => handleInputChange(cat, e.target.value)}
                         >
-                            {Array.from({ length: 11 }, (_, i) => (
+                            {Array.from({ length: 51 }, (_, i) => (
                                 <option key={i} value={i}>{i}</option>
                             ))}
                         </select>
@@ -112,20 +138,32 @@ export default function QuizFetcher() {
                 <button onClick={fetchQuestions} className={styles.button}>
                     Generate Quiz
                 </button>
-                <button onClick={resetQuestionsOnly} className={styles.button} style={{ backgroundColor: '#ff4d4d' }}>
+
+                <button
+                    onClick={resetQuestionsOnly}
+                    className={styles.button}
+                    style={{ backgroundColor: "#ff4d4d" }}
+                >
                     Reset Questions
+                </button>
+
+                <button
+                    onClick={resetShownHistory}
+                    className={styles.button}
+                    style={{ backgroundColor: "#d9534f" }}
+                >
+                    Reset History
                 </button>
             </div>
 
             <p>Total questions selected: {totalSelected}</p>
+            <p>Unique questions shown so far: {shownQuestions.length}</p>
 
             {loading && <p>Loading …</p>}
             {error && <p className={styles.error}>{error}</p>}
 
-            {/* Only display persistent selected questions */}
-            <h2 className={styles.subtitle}>Selected Questions (Persistent)</h2>
+            <h2 className={styles.subtitle}></h2>
             <SelectableQuestionList questions={questions} />
         </div>
     );
 }
-
